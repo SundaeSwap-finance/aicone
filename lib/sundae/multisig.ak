@@ -92,7 +92,7 @@ test satisfying() {
     fn(n: MultisigScript, s: List<ByteArray>, v: ValidityRange) {
       !satisfied(n, s, v)
     }
-  list.and(
+  list.all(
     [
       satisfied(sig1, [key_hash1], valid_range(0, 1))?,
       satisfied(sig2, [key_hash1, key_hash2], valid_range(0, 1))?,
@@ -126,5 +126,6 @@ test satisfying() {
       unsatisfied(vesting, [key_hash3], valid_range(0, 5))?,
       unsatisfied(vesting, [key_hash3], valid_range(15, 20))?,
     ],
+    fn(n) { n },
   )
 }
