@@ -5,6 +5,7 @@ use aiken/dict.{Dict}
 use aiken/time.{PosixTime}
 use aiken/transaction.{ValidityRange}
 use aiken/transaction/credential.{StakeCredential, Inline, ScriptCredential}
+use sundae/test_utils.{trace_example}
 
 pub type MultisigScript {
   Signature { key_hash: ByteArray }
@@ -63,15 +64,23 @@ test satisfying() {
   let key_hash2 = "key2"
   let key_hash3 = "key3"
   let sig1 = Signature { key_hash: key_hash1 }
+  expect trace_example(@"Signature", sig1)
   let sig2 = Signature { key_hash: key_hash2 }
   let sig3 = Signature { key_hash: key_hash3 }
   let all_of = AllOf { scripts: [sig1, sig2] }
+  expect trace_example(@"AllOf", all_of)
   let any_of = AnyOf { scripts: [sig1, sig2] }
+  expect trace_example(@"AnyOf", any_of)
   let at_least = AtLeast { required: 2, scripts: [sig1, sig2, sig3] }
+  expect trace_example(@"AtLeast", at_least)
   let before = Before { time: 10 }
+  expect trace_example(@"Before", before)
   let after = After { time: 10 }
+  expect trace_example(@"After", after)
   let between = AllOf { scripts: [After { time: 10 }, Before { time: 15 }] }
+  expect trace_example(@"Between", between)
   let script = Script { script_hash: "some_script" }
+  expect trace_example(@"Script", script)
   let vesting =
     AnyOf {
       scripts: [
@@ -82,6 +91,7 @@ test satisfying() {
         script,
       ],
     }
+  expect trace_example(@"Vesting", vesting)
   // vested
   let valid_range =
     fn(lo: Int, hi: Int) -> ValidityRange {
