@@ -87,6 +87,7 @@ pub fn satisfied(
     expect recipient_amount >= sent
     // and at least the remainder (minus a fee) must be sent back to the script, or the owner has to sign the tx
     expect [output] = list.filter(outputs, fn(o) { o.address.payment_credential == ScriptCredential(own_script_hash) })
+    expect output.datum == utxo.datum
     or {
         multisig.satisfied(plan.owner, signatories, valid_range, withdrawals),
         value.lovelace_of(output.value) >= owned - plan.fee
