@@ -1,9 +1,9 @@
-use aiken/dict.{Dict}
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/list
+use aiken/pairs
 use aiken/time.{PosixTime}
 use aiken/transaction.{ValidityRange}
-use aiken/transaction/credential.{StakeCredential}
+use aiken/transaction/credential.{Inline, ScriptCredential, StakeCredential}
 use sundae/test_utils.{trace_example}
 
 pub type MultisigScript {
@@ -20,7 +20,7 @@ pub fn satisfied(
   script: MultisigScript,
   signatories: List<ByteArray>,
   valid_range: ValidityRange,
-  withdrawals: Dict<StakeCredential, Int>,
+  withdrawals: Pairs<StakeCredential, Int>,
 ) -> Bool {
   when script is {
     Signature { key_hash } -> list.has(signatories, key_hash)
@@ -60,7 +60,8 @@ pub fn satisfied(
           }
         _ -> False
       }
-    Script { script_hash } -> dict.has_key(withdrawals, script_hash)
+    Script { script_hash } ->
+      pairs.has_key(withdrawals, Inline(ScriptCredential(script_hash)))
   }
 }
 
@@ -111,24 +112,24 @@ test satisfying() {
         },
       }
     }
-  let no_w = dict.new()
+  let no_w: Pairs<StakeCredential, Int> =
+    []
   let correct_w =
-    dict.new()
-      |> dict.insert("some_script", 0)
+    [Pair(Inline(ScriptCredential("some_script")), 0)]
   let incorrect_w =
-    dict.new()
-      |> dict.insert("other_script", 0)
+    [Pair(Inline(ScriptCredential("other_script")), 0)]
   let both_w =
-    dict.new()
-      |> dict.insert("some_script", 0)
-      |> dict.insert("other_script", 0)
+    [
+      Pair(Inline(ScriptCredential("some_script")), 0),
+      Pair(Inline(ScriptCredential("other_script")), 0),
+    ]
   // Helper method because ? binds more tightly than !
   let unsatisfied =
     fn(
       n: MultisigScript,
       s: List<ByteArray>,
       v: ValidityRange,
-      w: Dict<StakeCredential, Int>,
+      w: Pairs<StakeCredential, Int>,
     ) {
       !satisfied(n, s, v, w)
     }
