@@ -1,10 +1,9 @@
-use aiken/bytearray
 use aiken/interval.{Finite, Interval, IntervalBound}
 use aiken/list
-use aiken/dict.{Dict}
+use aiken/pairs
 use aiken/time.{PosixTime}
 use aiken/transaction.{ValidityRange}
-use aiken/transaction/credential.{StakeCredential, Inline, ScriptCredential}
+use aiken/transaction/credential.{Inline, ScriptCredential, StakeCredential}
 use sundae/test_utils.{trace_example}
 
 pub type MultisigScript {
@@ -21,14 +20,20 @@ pub fn satisfied(
   script: MultisigScript,
   signatories: List<ByteArray>,
   valid_range: ValidityRange,
-  withdrawals: Dict<StakeCredential, Int>,
+  withdrawals: Pairs<StakeCredential, Int>,
 ) -> Bool {
   when script is {
     Signature { key_hash } -> list.has(signatories, key_hash)
     AllOf { scripts } ->
-      list.all(scripts, fn(s) { satisfied(s, signatories, valid_range, withdrawals) })
+      list.all(
+        scripts,
+        fn(s) { satisfied(s, signatories, valid_range, withdrawals) },
+      )
     AnyOf { scripts } ->
-      list.any(scripts, fn(s) { satisfied(s, signatories, valid_range, withdrawals) })
+      list.any(
+        scripts,
+        fn(s) { satisfied(s, signatories, valid_range, withdrawals) },
+      )
     AtLeast { required, scripts } ->
       required <= list.count(
         scripts,
@@ -55,7 +60,8 @@ pub fn satisfied(
           }
         _ -> False
       }
-    Script { script_hash } -> dict.has_key(withdrawals, Inline(ScriptCredential(script_hash)))
+    Script { script_hash } ->
+      pairs.has_key(withdrawals, Inline(ScriptCredential(script_hash)))
   }
 }
 
@@ -106,30 +112,25 @@ test satisfying() {
         },
       }
     }
-  let no_w = dict.new()
-  let correct_credential = Inline(ScriptCredential("some_script"))
-  let incorrect_credential = Inline(ScriptCredential("other_script"))
-  let compare_credential = fn(a: StakeCredential, b: StakeCredential) -> Ordering {
-    when a is {
-      Inline(ScriptCredential(a))-> {
-        when b is {
-          Inline(ScriptCredential(b)) -> bytearray.compare(a, b)
-          _ -> Less
-        }
-      }
-      _ -> Greater
-    }
-  }
-  let correct_w = dict.new()
-    |> dict.insert(correct_credential, 0, compare_credential)
-  let incorrect_w = dict.new()
-    |> dict.insert(incorrect_credential, 0, compare_credential)
-  let both_w = dict.new()
-    |> dict.insert(correct_credential, 0, compare_credential)
-    |> dict.insert(incorrect_credential, 0, compare_credential)
+  let no_w: Pairs<StakeCredential, Int> =
+    []
+  let correct_w =
+    [Pair(Inline(ScriptCredential("some_script")), 0)]
+  let incorrect_w =
+    [Pair(Inline(ScriptCredential("other_script")), 0)]
+  let both_w =
+    [
+      Pair(Inline(ScriptCredential("some_script")), 0),
+      Pair(Inline(ScriptCredential("other_script")), 0),
+    ]
   // Helper method because ? binds more tightly than !
   let unsatisfied =
-    fn(n: MultisigScript, s: List<ByteArray>, v: ValidityRange, w: Dict<StakeCredential, Int>) {
+    fn(
+      n: MultisigScript,
+      s: List<ByteArray>,
+      v: ValidityRange,
+      w: Pairs<StakeCredential, Int>,
+    ) {
       !satisfied(n, s, v, w)
     }
   list.all(
