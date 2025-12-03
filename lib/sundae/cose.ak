@@ -1,89 +1,94 @@
 use aiken/builtin
 use aiken/cbor
 use aiken/collection/list
+use aiken/collection/pairs
 use aiken/crypto
 use aiken/option
 
-const hdr_key_id: Data = 4
+pub const hdr_key_id: Data = 4
 
-type COSESignatures =
+pub type COSESignatures =
   List<COSESignature>
 
-type HeaderMap =
+pub type HeaderMap =
   Pairs<Data, Data>
 
-type Headers {
+pub type Headers {
   protected: HeaderMap,
   unprotected: HeaderMap,
 }
 
-type COSESignature {
+pub type COSESignature {
   headers: Headers,
   signature: ByteArray,
 }
 
-type COSESign1 {
+pub type COSESign1 {
   headers: Headers,
   payload: Option<ByteArray>,
   signature: ByteArray,
 }
 
-type COSESign {
+pub type COSESign {
   headers: Headers,
   payload: Option<ByteArray>,
   signatures: COSESignatures,
 }
 
-type SignedMessage {
+pub type SignedMessage {
   MultiSig(COSESign)
   SingleSig(COSESign1)
 }
 
-type SigStructure {
+pub type SigStructure {
   context: ByteArray,
   body_protected: ByteArray,
   external_aad: ByteArray,
   payload: ByteArray,
 }
 
-fn data_to_sign(
+pub fn data_to_sign(
   signed_message: SignedMessage,
   external_aad: Option<ByteArray>,
 ) -> SigStructure {
-  when signed_message is {
-    SingleSig(cose_sign1) -> {
-      let body_protected =
-        if list.length(cose_sign1.headers.protected) > 0 {
-          cbor.serialise(cose_sign1.headers.protected)
-        } else {
-          #""
-        }
-      SigStructure {
-        context: "Signature1",
-        body_protected,
-        external_aad: option.or_else(external_aad, #""),
-        payload: option.or_else(cose_sign1.payload, #""),
-      }
-    }
-    MultiSig(cose_sign) -> {
-      let body_protected =
-        if list.length(cose_sign.headers.protected) > 0 {
-          cbor.serialise(cose_sign.headers.protected)
-        } else {
-          #""
-        }
+  let headers = headers(signed_message)
 
-      SigStructure {
-        context: "Signature",
-        body_protected,
-        external_aad: option.or_else(external_aad, #""),
-        payload: option.or_else(cose_sign.payload, #""),
-      }
+  let body_protected =
+    if list.length(headers.protected) > 0 {
+      cbor.serialise(headers.protected)
+    } else {
+      #""
     }
+  SigStructure {
+    context: context(signed_message),
+    body_protected,
+    external_aad: option.or_else(external_aad, #""),
+    payload: payload(signed_message),
   }
 }
 
-fn serialise_sig_structure(sig_structure: SigStructure) -> ByteArray {
+pub fn headers(signed_message: SignedMessage) -> Headers {
+  when signed_message is {
+    SingleSig(cose_sign1) -> cose_sign1.headers
+    MultiSig(cose_sign) -> cose_sign.headers
+  }
+}
+
+pub fn context(signed_message: SignedMessage) -> ByteArray {
+  when signed_message is {
+    SingleSig(_) -> "Signature1"
+    MultiSig(_) -> "Signature"
+  }
+}
+
+pub fn payload(signed_message: SignedMessage) -> ByteArray {
+  when signed_message is {
+    SingleSig(cose_sign1) -> option.or_else(cose_sign1.payload, #"")
+    MultiSig(cose_sign) -> option.or_else(cose_sign.payload, #"")
+  }
+}
+
+pub fn serialise_sig_structure(sig_structure: SigStructure) -> ByteArray {
   let raw_bytes =
     cbor.serialise(
       [
@@ -107,6 +112,36 @@ fn serialise_sig_structure(sig_structure: SigStructure) -> ByteArray {
     #"84",
     builtin.append_bytearray(fixed_content_type_byte, content_bytes),
   )
+}
+
+pub fn extract_signatures(
+  signed_message: SignedMessage,
+) -> List<(crypto.VerificationKey, crypto.Signature)> {
+  when signed_message is {
+    SingleSig(cose_sign1) ->
+      when pairs.get_first(cose_sign1.headers.protected, hdr_key_id) is {
+        Some(key_data) -> {
+          expect key_bytes: crypto.VerificationKey = key_data
+          [(key_bytes, cose_sign1.signature)]
+        }
+        None -> []
+      }
+    MultiSig(cose_sign) ->
+      list.flat_map(
+        cose_sign.signatures,
+        fn(cose_signature) {
+          when
+            pairs.get_first(cose_signature.headers.protected, hdr_key_id)
+          is {
+            Some(key_data) -> {
+              expect key_bytes: crypto.VerificationKey = key_data
+              [(key_bytes, cose_signature.signature)]
+            }
+            None -> []
+          }
+        },
+      )
+  }
 }
 
 test single_signature() {
@@ -146,6 +181,8 @@ test single_signature() {
       serialised_sig_structure,
       signature,
     )
+
+  expect extract_signatures(signed_message) == [(pub_key, signature)]
 
   True
 }
@@ -213,6 +250,11 @@ test multi_signature() {
       serialised_sig_structure,
       signature_2,
     )
+
+  expect
+    extract_signatures(signed_message) == [
+      (pub_key_1, signature_1), (pub_key_2, signature_2),
+    ]
 
   True
 }
