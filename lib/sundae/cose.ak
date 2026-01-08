@@ -258,3 +258,63 @@ test multi_signature() {
 
   True
 }
+
+/// Build a SigStructure for a COSESign1 message using an external payload.
+/// This is used when the COSESign1.payload is None and the actual payload
+/// is stored separately (e.g., in SignedRedeemer.payload).
+pub fn build_sig_structure_for_sign1(
+  headers: Headers,
+  payload: ByteArray,
+) -> SigStructure {
+  let body_protected =
+    if list.length(headers.protected) > 0 {
+      cbor.serialise(headers.protected)
+    } else {
+      #""
+    }
+  SigStructure {
+    context: "Signature1",
+    body_protected,
+    external_aad: #"",
+    payload,
+  }
+}
+
+test build_sig_structure_for_sign1_test() {
+  let pub_key =
+    #"384783f24116d6a337f62e20ec8da898bab5379bc49d1dc7317fa446ee3d40ab"
+
+  let signature =
+    #"95dad3041fd972ac86eeeb5f462a438b7dca10d7bfc287618e4c5401a3bca6217829e1ee5ca2bfac5f4106ec8f26d6851a7ff8975f1be1dc438ba8b277219800"
+
+  let headers =
+    Headers {
+      protected: [
+        Pair(as_data(1), as_data(-8)),
+        Pair(as_data(hdr_key_id), as_data(pub_key)),
+      ],
+      unprotected: [],
+    }
+
+  let payload: ByteArray = "Hello, Cardano!"
+
+  let sig_structure = build_sig_structure_for_sign1(headers, payload)
+
+  // Should produce same result as data_to_sign for a SingleSig message
+  let signed_message =
+    SingleSig(
+      COSESign1 { headers, payload: Some(payload), signature },
+    )
+  let expected_sig_structure = data_to_sign(signed_message, None)
+
+  expect sig_structure.context == expected_sig_structure.context
+  expect sig_structure.body_protected == expected_sig_structure.body_protected
+  expect sig_structure.external_aad == expected_sig_structure.external_aad
+  expect sig_structure.payload == expected_sig_structure.payload
+
+  // Also verify that it can be serialized and verified
+  let serialised = serialise_sig_structure(sig_structure)
+  expect crypto.verify_ed25519_signature(pub_key, serialised, signature)
+
+  True
+}

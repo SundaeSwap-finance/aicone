@@ -242,3 +242,87 @@ test satisfying_payload() {
     !satisfied_payload(sig1, payload, [(key1, wrong_signature)], valid_range(0,1), no_w),
   }
 }
+
+/// Verify a multisig script where each signer may have signed a different payload.
+/// This is needed for COSESign1 compatibility where each signer's Sig_structure
+/// includes their own protected headers.
+///
+/// Each entry in signatures is (VerificationKey, Signature, Payload) where
+/// Payload is the serialized Sig_structure that was signed by that key.
+pub fn satisfy_payloads(
+  script: MultisigScript,
+  signatures: List<(VerificationKey, Signature, ByteArray)>,
+  valid_range: ValidityRange,
+  withdrawals: Pairs<Credential, Lovelace>,
+) -> Bool {
+  when script is {
+    Signature { key_hash } -> {
+      expect Some((public_key, signature, payload)) =
+        list.find(signatures, fn((k, _, _)) { blake2b_224(k) == key_hash })
+      verify_ed25519_signature(public_key, payload, signature)
+    }
+    AllOf { scripts } ->
+      list.all(
+        scripts,
+        fn(s) { satisfy_payloads(s, signatures, valid_range, withdrawals) },
+      )
+    AnyOf { scripts } ->
+      list.any(
+        scripts,
+        fn(s) { satisfy_payloads(s, signatures, valid_range, withdrawals) },
+      )
+    AtLeast { required, scripts } ->
+      required <= list.count(
+        scripts,
+        fn(s) { satisfy_payloads(s, signatures, valid_range, withdrawals) },
+      )
+    Before { time } ->
+      when valid_range.upper_bound is {
+        IntervalBound { bound_type: Finite(hi), is_inclusive: True } ->
+          hi <= time
+        IntervalBound { bound_type: Finite(hi), is_inclusive: False } ->
+          hi < time
+        _ -> False
+      }
+    After { time } ->
+      when valid_range.lower_bound is {
+        IntervalBound { bound_type: Finite(lo), is_inclusive: True } ->
+          time <= lo
+        IntervalBound { bound_type: Finite(lo), is_inclusive: False } ->
+          time < lo
+        _ -> False
+      }
+    Script { script_hash } ->
+      pairs.has_key(withdrawals, address.Script(script_hash))
+  }
+}
+
+test satisfy_payloads_test() {
+  // Each signer can have their own payload (simulating different Sig_structures
+  // due to different protected headers in COSESign1)
+  let payload = "some_payload"
+  // Generated from seed "E5C6E8D39E443DC0A2845BB13217070EE2D82E7C1BE580DA22E7C6BF2DB56EA9"
+  // here: https://cyphr.me/ed25519_tool/ed.html
+  let key1 = #"BECFF931D5043DB380B78F5B1BA79D549999024C5FC0C9DD9390DA0D12B054BC"
+  let key_hash1 = blake2b_224(key1)
+  let sig1 = Signature { key_hash: key_hash1 }
+  let signature =
+    #"BDA2210A08762FC1032523653F32D57CC97BFBAF84C46566625F4240C3AD59D3D2EFC7A1D1640CF79E4D337368595E7BDCE92AF6EA0C3278C2998482B8DD7D05"
+  let wrong_signature =
+    #"CDA2210A08762FC1032523653F32D57CC97BFBAF84C46566625F4240C3AD59D3D2EFC7A1D1640CF79E4D337368595E7BDCE92AF6EA0C3278C2998482B8DD7D05"
+  let no_w: Pairs<Credential, Lovelace> = []
+  and {
+    satisfy_payloads(
+      sig1,
+      [(key1, signature, payload)],
+      valid_range(0, 1),
+      no_w,
+    ),
+    !satisfy_payloads(
+      sig1,
+      [(key1, wrong_signature, payload)],
+      valid_range(0, 1),
+      no_w,
+    ),
+  }
+}
