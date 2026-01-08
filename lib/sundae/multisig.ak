@@ -119,14 +119,8 @@ pub fn satisfied_payload(
 
 fn valid_range(lo: Int, hi: Int) -> ValidityRange {
   Interval {
-    lower_bound: IntervalBound {
-      bound_type: Finite(lo),
-      is_inclusive: True,
-    },
-    upper_bound: IntervalBound {
-      bound_type: Finite(hi),
-      is_inclusive: False,
-    },
+    lower_bound: IntervalBound { bound_type: Finite(lo), is_inclusive: True },
+    upper_bound: IntervalBound { bound_type: Finite(hi), is_inclusive: False },
   }
 }
 
@@ -163,12 +157,9 @@ test satisfying() {
       ],
     }
   trace @"Vesting": vesting
-  let no_w: Pairs<Credential, Lovelace> =
-    []
-  let correct_w =
-    [Pair(address.Script("some_script"), 0)]
-  let incorrect_w =
-    [Pair(address.Script("other_script"), 0)]
+  let no_w: Pairs<Credential, Lovelace> = []
+  let correct_w = [Pair(address.Script("some_script"), 0)]
+  let incorrect_w = [Pair(address.Script("other_script"), 0)]
   let both_w =
     [
       Pair(address.Script("some_script"), 0),
@@ -231,15 +222,29 @@ test satisfying_payload() {
   let payload = "some_payload"
   // Generated from seed "E5C6E8D39E443DC0A2845BB13217070EE2D82E7C1BE580DA22E7C6BF2DB56EA9"
   // here: https://cyphr.me/ed25519_tool/ed.html
-  let key1 = #"BECFF931D5043DB380B78F5B1BA79D549999024C5FC0C9DD9390DA0D12B054BC"
+  let key1 = #"becff931d5043db380b78f5b1ba79d549999024c5fc0c9dd9390da0d12b054bc"
   let key_hash1 = blake2b_224(key1)
   let sig1 = Signature { key_hash: key_hash1 }
-  let signature = #"BDA2210A08762FC1032523653F32D57CC97BFBAF84C46566625F4240C3AD59D3D2EFC7A1D1640CF79E4D337368595E7BDCE92AF6EA0C3278C2998482B8DD7D05"
-  let wrong_signature = #"CDA2210A08762FC1032523653F32D57CC97BFBAF84C46566625F4240C3AD59D3D2EFC7A1D1640CF79E4D337368595E7BDCE92AF6EA0C3278C2998482B8DD7D05"
+  let signature =
+    #"bda2210a08762fc1032523653f32d57cc97bfbaf84c46566625f4240c3ad59d3d2efc7a1d1640cf79e4d337368595e7bdce92af6ea0c3278c2998482b8dd7d05"
+  let wrong_signature =
+    #"cda2210a08762fc1032523653f32d57cc97bfbaf84c46566625f4240c3ad59d3d2efc7a1d1640cf79e4d337368595e7bdce92af6ea0c3278c2998482b8dd7d05"
   let no_w: Pairs<Credential, Lovelace> = []
   and {
-    satisfied_payload(sig1, payload, [(key1, signature)], valid_range(0,1), no_w),
-    !satisfied_payload(sig1, payload, [(key1, wrong_signature)], valid_range(0,1), no_w),
+    satisfied_payload(
+      sig1,
+      payload,
+      [(key1, signature)],
+      valid_range(0, 1),
+      no_w,
+    ),
+    !satisfied_payload(
+      sig1,
+      payload,
+      [(key1, wrong_signature)],
+      valid_range(0, 1),
+      no_w,
+    ),
   }
 }
 
@@ -249,7 +254,7 @@ test satisfying_payload() {
 ///
 /// Each entry in signatures is (VerificationKey, Signature, Payload) where
 /// Payload is the serialized Sig_structure that was signed by that key.
-pub fn satisfy_payloads(
+pub fn satisfied_payloads(
   script: MultisigScript,
   signatures: List<(VerificationKey, Signature, ByteArray)>,
   valid_range: ValidityRange,
@@ -264,17 +269,17 @@ pub fn satisfy_payloads(
     AllOf { scripts } ->
       list.all(
         scripts,
-        fn(s) { satisfy_payloads(s, signatures, valid_range, withdrawals) },
+        fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
       )
     AnyOf { scripts } ->
       list.any(
         scripts,
-        fn(s) { satisfy_payloads(s, signatures, valid_range, withdrawals) },
+        fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
       )
     AtLeast { required, scripts } ->
       required <= list.count(
         scripts,
-        fn(s) { satisfy_payloads(s, signatures, valid_range, withdrawals) },
+        fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
       )
     Before { time } ->
       when valid_range.upper_bound is {
@@ -297,28 +302,28 @@ pub fn satisfy_payloads(
   }
 }
 
-test satisfy_payloads_test() {
+test satisfied_payloads_test() {
   // Each signer can have their own payload (simulating different Sig_structures
   // due to different protected headers in COSESign1)
   let payload = "some_payload"
   // Generated from seed "E5C6E8D39E443DC0A2845BB13217070EE2D82E7C1BE580DA22E7C6BF2DB56EA9"
   // here: https://cyphr.me/ed25519_tool/ed.html
-  let key1 = #"BECFF931D5043DB380B78F5B1BA79D549999024C5FC0C9DD9390DA0D12B054BC"
+  let key1 = #"becff931d5043db380b78f5b1ba79d549999024c5fc0c9dd9390da0d12b054bc"
   let key_hash1 = blake2b_224(key1)
   let sig1 = Signature { key_hash: key_hash1 }
   let signature =
-    #"BDA2210A08762FC1032523653F32D57CC97BFBAF84C46566625F4240C3AD59D3D2EFC7A1D1640CF79E4D337368595E7BDCE92AF6EA0C3278C2998482B8DD7D05"
+    #"bda2210a08762fc1032523653f32d57cc97bfbaf84c46566625f4240c3ad59d3d2efc7a1d1640cf79e4d337368595e7bdce92af6ea0c3278c2998482b8dd7d05"
   let wrong_signature =
-    #"CDA2210A08762FC1032523653F32D57CC97BFBAF84C46566625F4240C3AD59D3D2EFC7A1D1640CF79E4D337368595E7BDCE92AF6EA0C3278C2998482B8DD7D05"
+    #"cda2210a08762fc1032523653f32d57cc97bfbaf84c46566625f4240c3ad59d3d2efc7a1d1640cf79e4d337368595e7bdce92af6ea0c3278c2998482b8dd7d05"
   let no_w: Pairs<Credential, Lovelace> = []
   and {
-    satisfy_payloads(
+    satisfied_payloads(
       sig1,
       [(key1, signature, payload)],
       valid_range(0, 1),
       no_w,
     ),
-    !satisfy_payloads(
+    !satisfied_payloads(
       sig1,
       [(key1, wrong_signature, payload)],
       valid_range(0, 1),
