@@ -78,36 +78,71 @@ pub fn payload(signed_message: SignedMessage) -> ByteArray {
   }
 }
 
+/// Encode a byte array with definite-length CBOR encoding (major type 2).
+/// This produces `40-57` for 0-23 bytes, `58xx` for 24-255 bytes, `59xxxx` for 256-65535 bytes.
+fn encode_bytes_definite(data: ByteArray) -> ByteArray {
+  let len = builtin.length_of_bytearray(data)
+  if len <= 23 {
+    // 40-57: length encoded in lower 5 bits
+    builtin.cons_bytearray(0x40 + len, data)
+  } else if len <= 255 {
+    // 58 xx: 1-byte length prefix
+    builtin.cons_bytearray(0x58, builtin.cons_bytearray(len, data))
+  } else {
+    // 59 xx xx: 2-byte length prefix (big-endian)
+    let hi = len / 256
+    let lo = len % 256
+    builtin.cons_bytearray(
+      0x59,
+      builtin.cons_bytearray(hi, builtin.cons_bytearray(lo, data)),
+    )
+  }
+}
+
+/// Encode a text string with definite-length CBOR encoding (major type 3).
+/// This produces `60-77` for 0-23 chars, `78xx` for 24-255 chars.
+fn encode_text_definite(data: ByteArray) -> ByteArray {
+  let len = builtin.length_of_bytearray(data)
+  if len <= 23 {
+    // 60-77: length encoded in lower 5 bits
+    builtin.cons_bytearray(0x60 + len, data)
+  } else if len <= 255 {
+    // 78 xx: 1-byte length prefix
+    builtin.cons_bytearray(0x78, builtin.cons_bytearray(len, data))
+  } else {
+    // 79 xx xx: 2-byte length prefix (big-endian)
+    let hi = len / 256
+    let lo = len % 256
+    builtin.cons_bytearray(
+      0x79,
+      builtin.cons_bytearray(hi, builtin.cons_bytearray(lo, data)),
+    )
+  }
+}
+
 pub fn serialise_sig_structure(sig_structure: SigStructure) -> ByteArray {
   trace @"SigStructure.context": sig_structure.context
   trace @"SigStructure.body_protected": sig_structure.body_protected
   trace @"SigStructure.external_aad": sig_structure.external_aad
   trace @"SigStructure.payload": sig_structure.payload
 
-  let raw_bytes =
-    cbor.serialise(
-      [
-        sig_structure.context,
-        sig_structure.body_protected,
-        sig_structure.external_aad,
-        sig_structure.payload,
-      ],
-    )
-  trace @"raw_bytes (CBOR serialised)": raw_bytes
-
-  let context_type_byte = builtin.slice_bytearray(1, 1, raw_bytes)
-  let fixed_content_type_byte = builtin.write_bits(context_type_byte, [5], True)
-  let content_bytes =
-    builtin.slice_bytearray(
-      2,
-      builtin.length_of_bytearray(raw_bytes) - 3,
-      raw_bytes,
-    )
+  // Manually construct CBOR with definite-length encoding to match CIP-30 wallets
+  // Format: 84 (4-element array) + context + body_protected + external_aad + payload
+  let context_encoded = encode_text_definite(sig_structure.context)
+  let body_protected_encoded = encode_bytes_definite(sig_structure.body_protected)
+  let external_aad_encoded = encode_bytes_definite(sig_structure.external_aad)
+  let payload_encoded = encode_bytes_definite(sig_structure.payload)
 
   let result =
     builtin.append_bytearray(
       #"84",
-      builtin.append_bytearray(fixed_content_type_byte, content_bytes),
+      builtin.append_bytearray(
+        context_encoded,
+        builtin.append_bytearray(
+          body_protected_encoded,
+          builtin.append_bytearray(external_aad_encoded, payload_encoded),
+        ),
+      ),
     )
   trace @"serialise_sig_structure result": result
   result

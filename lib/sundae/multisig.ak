@@ -268,6 +268,9 @@ pub fn satisfied_payloads(
       when found is {
         Some((public_key, signature, payload)) -> {
           trace @"Found signature, verifying..."
+          trace @"verify_ed25519 public_key": public_key
+          trace @"verify_ed25519 payload": payload
+          trace @"verify_ed25519 signature": signature
           let result = verify_ed25519_signature(public_key, payload, signature)
           trace @"Signature verification result": result
           result
