@@ -262,43 +262,89 @@ pub fn satisfied_payloads(
 ) -> Bool {
   when script is {
     Signature { key_hash } -> {
-      expect Some((public_key, signature, payload)) =
+      trace @"Checking Signature for key_hash": key_hash
+      let found =
         list.find(signatures, fn((k, _, _)) { blake2b_224(k) == key_hash })
-      verify_ed25519_signature(public_key, payload, signature)
+      when found is {
+        Some((public_key, signature, payload)) -> {
+          trace @"Found signature, verifying..."
+          trace @"verify_ed25519 public_key": public_key
+          trace @"verify_ed25519 payload": payload
+          trace @"verify_ed25519 signature": signature
+          let result = verify_ed25519_signature(public_key, payload, signature)
+          trace @"Signature verification result": result
+          result
+        }
+        None -> {
+          trace @"No signature found for key_hash": key_hash
+          False
+        }
+      }
     }
-    AllOf { scripts } ->
-      list.all(
-        scripts,
-        fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
-      )
-    AnyOf { scripts } ->
-      list.any(
-        scripts,
-        fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
-      )
-    AtLeast { required, scripts } ->
-      required <= list.count(
-        scripts,
-        fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
-      )
-    Before { time } ->
-      when valid_range.upper_bound is {
-        IntervalBound { bound_type: Finite(hi), is_inclusive: True } ->
-          hi <= time
-        IntervalBound { bound_type: Finite(hi), is_inclusive: False } ->
-          hi < time
-        _ -> False
-      }
-    After { time } ->
-      when valid_range.lower_bound is {
-        IntervalBound { bound_type: Finite(lo), is_inclusive: True } ->
-          time <= lo
-        IntervalBound { bound_type: Finite(lo), is_inclusive: False } ->
-          time < lo
-        _ -> False
-      }
-    Script { script_hash } ->
-      pairs.has_key(withdrawals, address.Script(script_hash))
+    AllOf { scripts } -> {
+      trace @"Checking AllOf with script count": list.length(scripts)
+      let result =
+        list.all(
+          scripts,
+          fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
+        )
+      trace @"AllOf result": result
+      result
+    }
+    AnyOf { scripts } -> {
+      trace @"Checking AnyOf with script count": list.length(scripts)
+      let result =
+        list.any(
+          scripts,
+          fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
+        )
+      trace @"AnyOf result": result
+      result
+    }
+    AtLeast { required, scripts } -> {
+      trace @"Checking AtLeast": required
+      let count =
+        list.count(
+          scripts,
+          fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
+        )
+      trace @"AtLeast satisfied count": count
+      let result = required <= count
+      trace @"AtLeast result": result
+      result
+    }
+    Before { time } -> {
+      trace @"Checking Before": time
+      let result =
+        when valid_range.upper_bound is {
+          IntervalBound { bound_type: Finite(hi), is_inclusive: True } ->
+            hi <= time
+          IntervalBound { bound_type: Finite(hi), is_inclusive: False } ->
+            hi < time
+          _ -> False
+        }
+      trace @"Before result": result
+      result
+    }
+    After { time } -> {
+      trace @"Checking After": time
+      let result =
+        when valid_range.lower_bound is {
+          IntervalBound { bound_type: Finite(lo), is_inclusive: True } ->
+            time <= lo
+          IntervalBound { bound_type: Finite(lo), is_inclusive: False } ->
+            time < lo
+          _ -> False
+        }
+      trace @"After result": result
+      result
+    }
+    Script { script_hash } -> {
+      trace @"Checking Script": script_hash
+      let result = pairs.has_key(withdrawals, address.Script(script_hash))
+      trace @"Script result": result
+      result
+    }
   }
 }
 

@@ -1,0 +1,14 @@
+{
+  "preamble": {
+    "title": "sundaeswap-finance/aicone",
+    "description": "Aiken contracts for project 'sundaeswap-finance/aicone'",
+    "version": "0.0.0",
+    "plutusVersion": "v3",
+    "compiler": {
+      "name": "Aiken",
+      "version": "v1.1.19+e525483"
+    },
+    "license": "Apache-2.0"
+  },
+  "validators": []
+}
