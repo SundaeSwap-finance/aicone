@@ -70,11 +70,16 @@ pub fn satisfied_payload(
   withdrawals: Pairs<Credential, Lovelace>,
 ) -> Bool {
   when script is {
-    Signature { key_hash } -> {
-      expect Some((public_key, signature)) =
-        list.find(signatures, fn((k, _)) { blake2b_224(k) == key_hash })
-      verify_ed25519_signature(public_key, payload, signature)
-    }
+    // A member without a matching signature is unsatisfied, not an abort:
+    // AtLeast counts with list.count (no short-circuit), so a trapping leaf
+    // would fail a met threshold on the first non-signing member. Mirrors the
+    // total `satisfied` leaf (list.has).
+    Signature { key_hash } ->
+      when list.find(signatures, fn((k, _)) { blake2b_224(k) == key_hash }) is {
+        Some((public_key, signature)) ->
+          verify_ed25519_signature(public_key, payload, signature)
+        None -> False
+      }
     AllOf { scripts } ->
       list.all(
         scripts,
@@ -119,14 +124,8 @@ pub fn satisfied_payload(
 
 fn valid_range(lo: Int, hi: Int) -> ValidityRange {
   Interval {
-    lower_bound: IntervalBound {
-      bound_type: Finite(lo),
-      is_inclusive: True,
-    },
-    upper_bound: IntervalBound {
-      bound_type: Finite(hi),
-      is_inclusive: False,
-    },
+    lower_bound: IntervalBound { bound_type: Finite(lo), is_inclusive: True },
+    upper_bound: IntervalBound { bound_type: Finite(hi), is_inclusive: False },
   }
 }
 
@@ -152,38 +151,32 @@ test satisfying() {
   trace @"Between": between
   let script = Script { script_hash: "some_script" }
   trace @"Script": script
-  let vesting =
-    AnyOf {
-      scripts: [
-        AllOf { scripts: [before, sig1] },
-        // clawback
-        AllOf { scripts: [after, sig2] },
-        // dao clawback
-        script,
-      ],
-    }
+  let vesting = AnyOf {
+    scripts: [
+      AllOf { scripts: [before, sig1] },
+      // clawback
+      AllOf { scripts: [after, sig2] },
+      // dao clawback
+      script,
+    ],
+  }
   trace @"Vesting": vesting
-  let no_w: Pairs<Credential, Lovelace> =
-    []
-  let correct_w =
-    [Pair(address.Script("some_script"), 0)]
-  let incorrect_w =
-    [Pair(address.Script("other_script"), 0)]
-  let both_w =
-    [
-      Pair(address.Script("some_script"), 0),
-      Pair(address.Script("other_script"), 0),
-    ]
+  let no_w: Pairs<Credential, Lovelace> = []
+  let correct_w = [Pair(address.Script("some_script"), 0)]
+  let incorrect_w = [Pair(address.Script("other_script"), 0)]
+  let both_w = [
+    Pair(address.Script("some_script"), 0),
+    Pair(address.Script("other_script"), 0),
+  ]
   // Helper method because ? binds more tightly than !
-  let unsatisfied =
-    fn(
-      n: MultisigScript,
-      s: List<ByteArray>,
-      v: ValidityRange,
-      w: Pairs<Credential, Lovelace>,
-    ) {
-      !satisfied(n, s, v, w)
-    }
+  let unsatisfied = fn(
+    n: MultisigScript,
+    s: List<ByteArray>,
+    v: ValidityRange,
+    w: Pairs<Credential, Lovelace>,
+  ) {
+    !satisfied(n, s, v, w)
+  }
   list.all(
     [
       satisfied(sig1, [key_hash1], valid_range(0, 1), no_w)?,
@@ -231,14 +224,64 @@ test satisfying_payload() {
   let payload = "some_payload"
   // Generated from seed "E5C6E8D39E443DC0A2845BB13217070EE2D82E7C1BE580DA22E7C6BF2DB56EA9"
   // here: https://cyphr.me/ed25519_tool/ed.html
-  let key1 = #"BECFF931D5043DB380B78F5B1BA79D549999024C5FC0C9DD9390DA0D12B054BC"
+  let key1 = #"becff931d5043db380b78f5b1ba79d549999024c5fc0c9dd9390da0d12b054bc"
   let key_hash1 = blake2b_224(key1)
   let sig1 = Signature { key_hash: key_hash1 }
-  let signature = #"BDA2210A08762FC1032523653F32D57CC97BFBAF84C46566625F4240C3AD59D3D2EFC7A1D1640CF79E4D337368595E7BDCE92AF6EA0C3278C2998482B8DD7D05"
-  let wrong_signature = #"CDA2210A08762FC1032523653F32D57CC97BFBAF84C46566625F4240C3AD59D3D2EFC7A1D1640CF79E4D337368595E7BDCE92AF6EA0C3278C2998482B8DD7D05"
+  let signature = #"bda2210a08762fc1032523653f32d57cc97bfbaf84c46566625f4240c3ad59d3d2efc7a1d1640cf79e4d337368595e7bdce92af6ea0c3278c2998482b8dd7d05"
+  let wrong_signature = #"cda2210a08762fc1032523653f32d57cc97bfbaf84c46566625f4240c3ad59d3d2efc7a1d1640cf79e4d337368595e7bdce92af6ea0c3278c2998482b8dd7d05"
   let no_w: Pairs<Credential, Lovelace> = []
   and {
-    satisfied_payload(sig1, payload, [(key1, signature)], valid_range(0,1), no_w),
-    !satisfied_payload(sig1, payload, [(key1, wrong_signature)], valid_range(0,1), no_w),
+    satisfied_payload(
+      sig1,
+      payload,
+      [(key1, signature)],
+      valid_range(0, 1),
+      no_w,
+    ),
+    !satisfied_payload(
+      sig1,
+      payload,
+      [(key1, wrong_signature)],
+      valid_range(0, 1),
+      no_w,
+    ),
   }
+}
+
+// A declared member with no matching signature must count as unsatisfied, not
+// abort the whole check. AtLeast counts with list.count (no short-circuit), so
+// a trapping leaf would fail a met threshold; AnyOf traps only when the absent
+// member sorts before a satisfied one. Both regressions covered here.
+test satisfying_payload_atleast_tolerates_absent_signer() {
+  let payload = "some_payload"
+  let key1 = #"becff931d5043db380b78f5b1ba79d549999024c5fc0c9dd9390da0d12b054bc"
+  let sig1 = Signature { key_hash: blake2b_224(key1) }
+  let signature = #"bda2210a08762fc1032523653f32d57cc97bfbaf84c46566625f4240c3ad59d3d2efc7a1d1640cf79e4d337368595e7bdce92af6ea0c3278c2998482b8dd7d05"
+  let absent = Signature { key_hash: #"00" }
+  let no_w: Pairs<Credential, Lovelace> = []
+  let script = AtLeast { required: 1, scripts: [sig1, absent] }
+  satisfied_payload(
+    script,
+    payload,
+    [(key1, signature)],
+    valid_range(0, 1),
+    no_w,
+  )
+}
+
+test satisfying_payload_anyof_tolerates_absent_signer_first() {
+  let payload = "some_payload"
+  let key1 = #"becff931d5043db380b78f5b1ba79d549999024c5fc0c9dd9390da0d12b054bc"
+  let sig1 = Signature { key_hash: blake2b_224(key1) }
+  let signature = #"bda2210a08762fc1032523653f32d57cc97bfbaf84c46566625f4240c3ad59d3d2efc7a1d1640cf79e4d337368595e7bdce92af6ea0c3278c2998482b8dd7d05"
+  let absent = Signature { key_hash: #"00" }
+  let no_w: Pairs<Credential, Lovelace> = []
+  let script = AnyOf { scripts: [absent, sig1] }
+  satisfied_payload(
+    script,
+    payload,
+    [(key1, signature)],
+    valid_range(0, 1),
+    no_w,
+  )
 }
