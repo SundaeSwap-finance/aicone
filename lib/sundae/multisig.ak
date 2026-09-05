@@ -285,3 +285,180 @@ test satisfying_payload_anyof_tolerates_absent_signer_first() {
     no_w,
   )
 }
+
+/// Verify a multisig script where each signer may have signed a different payload.
+/// This is needed for COSESign1 compatibility where each signer's Sig_structure
+/// includes their own protected headers.
+///
+/// Each entry in signatures is (VerificationKey, Signature, Payload) where
+/// Payload is the serialized Sig_structure that was signed by that key.
+pub fn satisfied_payloads(
+  script: MultisigScript,
+  signatures: List<(VerificationKey, Signature, ByteArray)>,
+  valid_range: ValidityRange,
+  withdrawals: Pairs<Credential, Lovelace>,
+) -> Bool {
+  when script is {
+    Signature { key_hash } -> {
+      trace @"Checking Signature for key_hash": key_hash
+      let found =
+        list.find(signatures, fn((k, _, _)) { blake2b_224(k) == key_hash })
+      when found is {
+        Some((public_key, signature, payload)) -> {
+          trace @"Found signature, verifying..."
+          trace @"verify_ed25519 public_key": public_key
+          trace @"verify_ed25519 payload": payload
+          trace @"verify_ed25519 signature": signature
+          let result = verify_ed25519_signature(public_key, payload, signature)
+          trace @"Signature verification result": result
+          result
+        }
+        None -> {
+          trace @"No signature found for key_hash": key_hash
+          False
+        }
+      }
+    }
+    AllOf { scripts } -> {
+      trace @"Checking AllOf with script count": list.length(scripts)
+      let result =
+        list.all(
+          scripts,
+          fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
+        )
+      trace @"AllOf result": result
+      result
+    }
+    AnyOf { scripts } -> {
+      trace @"Checking AnyOf with script count": list.length(scripts)
+      let result =
+        list.any(
+          scripts,
+          fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
+        )
+      trace @"AnyOf result": result
+      result
+    }
+    AtLeast { required, scripts } -> {
+      trace @"Checking AtLeast": required
+      let count =
+        list.count(
+          scripts,
+          fn(s) { satisfied_payloads(s, signatures, valid_range, withdrawals) },
+        )
+      trace @"AtLeast satisfied count": count
+      let result = required <= count
+      trace @"AtLeast result": result
+      result
+    }
+    Before { time } -> {
+      trace @"Checking Before": time
+      let result =
+        when valid_range.upper_bound is {
+          IntervalBound { bound_type: Finite(hi), is_inclusive: True } ->
+            hi <= time
+          IntervalBound { bound_type: Finite(hi), is_inclusive: False } ->
+            hi < time
+          _ -> False
+        }
+      trace @"Before result": result
+      result
+    }
+    After { time } -> {
+      trace @"Checking After": time
+      let result =
+        when valid_range.lower_bound is {
+          IntervalBound { bound_type: Finite(lo), is_inclusive: True } ->
+            time <= lo
+          IntervalBound { bound_type: Finite(lo), is_inclusive: False } ->
+            time < lo
+          _ -> False
+        }
+      trace @"After result": result
+      result
+    }
+    Script { script_hash } -> {
+      trace @"Checking Script": script_hash
+      let result = pairs.has_key(withdrawals, address.Script(script_hash))
+      trace @"Script result": result
+      result
+    }
+  }
+}
+
+test satisfied_payloads_test() {
+  // Each signer can have their own payload (simulating different Sig_structures
+  // due to different protected headers in COSESign1)
+  let payload = "some_payload"
+  // Generated from seed "E5C6E8D39E443DC0A2845BB13217070EE2D82E7C1BE580DA22E7C6BF2DB56EA9"
+  // here: https://cyphr.me/ed25519_tool/ed.html
+  let key1 = #"becff931d5043db380b78f5b1ba79d549999024c5fc0c9dd9390da0d12b054bc"
+  let key_hash1 = blake2b_224(key1)
+  let sig1 = Signature { key_hash: key_hash1 }
+  let signature =
+    #"bda2210a08762fc1032523653f32d57cc97bfbaf84c46566625f4240c3ad59d3d2efc7a1d1640cf79e4d337368595e7bdce92af6ea0c3278c2998482b8dd7d05"
+  let wrong_signature =
+    #"cda2210a08762fc1032523653f32d57cc97bfbaf84c46566625f4240c3ad59d3d2efc7a1d1640cf79e4d337368595e7bdce92af6ea0c3278c2998482b8dd7d05"
+  let no_w: Pairs<Credential, Lovelace> = []
+  and {
+    satisfied_payloads(
+      sig1,
+      [(key1, signature, payload)],
+      valid_range(0, 1),
+      no_w,
+    ),
+    !satisfied_payloads(
+      sig1,
+      [(key1, wrong_signature, payload)],
+      valid_range(0, 1),
+      no_w,
+    ),
+  }
+}
+
+// ============================================================================
+// Shape predicates
+// ============================================================================
+
+/// True if `script` can be satisfied by NOBODY — some path is met with no
+/// signature and no script-withdrawal, using structure or time bounds alone.
+/// A `Signature` or `Script` leaf is a real authenticator; `Before` / `After`
+/// and empty or zero-threshold combinators are not.
+///
+/// A caller that stores a multisig taken from untrusted data (for example an
+/// oracle key set supplied by datum) can reject an "authenticates no one"
+/// value with `!satisfiable_by_nobody(script)`. This leaves every real shape
+/// available — including the `Script` withdrawal path and future script-based
+/// restrictions — and rejects only the shapes anyone can satisfy.
+pub fn satisfiable_by_nobody(script: MultisigScript) -> Bool {
+  when script is {
+    Signature { .. } -> False
+    Script { .. } -> False
+    Before { .. } -> True
+    After { .. } -> True
+    AllOf { scripts } -> list.all(scripts, satisfiable_by_nobody)
+    AnyOf { scripts } -> list.any(scripts, satisfiable_by_nobody)
+    AtLeast { required, scripts } ->
+      required <= list.count(scripts, satisfiable_by_nobody)
+  }
+}
+
+test satisfiable_by_nobody_rejects_vacuous_and_time_only() {
+  let sig = Signature { key_hash: #"01" }
+  let scr = Script { script_hash: #"02" }
+  and {
+    // Vacuous or time-only shapes authenticate no one.
+    satisfiable_by_nobody(AtLeast { required: 0, scripts: [] }),
+    satisfiable_by_nobody(AllOf { scripts: [] }),
+    satisfiable_by_nobody(Before { time: 10 }),
+    satisfiable_by_nobody(After { time: 10 }),
+    satisfiable_by_nobody(AnyOf { scripts: [sig, Before { time: 10 }] }),
+    satisfiable_by_nobody(AtLeast { required: 0, scripts: [sig] }),
+    // A real authenticator is required on every satisfying path.
+    !satisfiable_by_nobody(sig),
+    !satisfiable_by_nobody(scr),
+    !satisfiable_by_nobody(AtLeast { required: 1, scripts: [sig] }),
+    !satisfiable_by_nobody(AllOf { scripts: [sig, Before { time: 10 }] }),
+    !satisfiable_by_nobody(AnyOf { scripts: [sig, scr] }),
+  }
+}
